@@ -1,0 +1,28 @@
+name: churchgate_hris_mobile
+description: "Churchgate Group HRIS Mobile App"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.15.4
+  crypto: ^3.0.3
+  intl: ^0.19.0
+  geolocator: ^10.1.0
+  connectivity_plus: ^5.0.2
+  share_plus: ^7.2.1
+  path_provider: ^2.1.2
+  url_launcher: ^6.2.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
