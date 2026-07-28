@@ -14110,12 +14110,13 @@ def requests_hub():
             try:
                 att_data = db._get("attendance")
                 if att_data:
+                    # Match by employee_id first (most reliable), then by name
                     filtered = []
                     for a in att_data:
                         a_id = str(a.get('employee_id', '')).strip()
                         a_name = str(a.get('employee_name', '')).lower().strip()
                         
-                        # Direct employee_id match (most reliable)
+                        # Direct employee_id match
                         if current_user_id and a_id == current_user_id:
                             filtered.append(a)
                             continue
@@ -14128,6 +14129,7 @@ def requests_hub():
                         # Match by first name
                         if current_first_name.lower() in a_name:
                             filtered.append(a)
+                            continue
                     
                     # Remove duplicates
                     seen = set()
