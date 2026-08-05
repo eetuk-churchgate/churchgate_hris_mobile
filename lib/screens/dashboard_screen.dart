@@ -14,6 +14,12 @@ import 'lms_screen.dart';
 import 'admin_clock_approvals.dart';
 import 'attendance_report_screen.dart';
 import 'login_screen.dart';
+import 'chat_screen.dart';
+import 'news_feed_screen.dart';
+import 'wellness_screen.dart';
+import 'ai_assistant_screen.dart';
+import 'payslip_screen.dart';
+import '../services/engagement_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -35,6 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Dashboard');
     _loadFullProfile();
     _loadProfilePicture();
     _loadPendingCounts();
@@ -114,7 +121,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final userName = widget.user['name'] ?? '';
       List<Map<String, dynamic>> activities = [];
 
-      // Load recent GPS clocks
       final gpsClocks = await _supabase
           .from('gps_attendance')
           .select()
@@ -128,11 +134,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'title': 'GPS ${c['clock_type'] ?? 'Clock'}',
           'subtitle': '${c['location_name'] ?? 'Remote'} - ${c['status'] ?? 'Pending'}',
           'date': _formatDate(c['sync_date']?.toString(), c['clock_time']?.toString()),
-          'color': const Color(0xFFCC0000),
         });
       }
 
-      // Load recent leave requests
       final leaves = await _supabase
           .from('leave_requests')
           .select()
@@ -146,11 +150,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'title': 'Leave ${l['status'] ?? 'Submitted'}',
           'subtitle': '${l['leave_type'] ?? 'Leave'} - ${l['no_of_days'] ?? 0} day(s)',
           'date': _formatDate(l['submitted_at']?.toString()?.substring(0, 10)),
-          'color': const Color(0xFF3182CE),
         });
       }
 
-      // Load recent KPI updates
       final kpis = await _supabase
           .from('kpi_history')
           .select()
@@ -164,11 +166,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'title': 'KPI ${k['action'] ?? 'Updated'}',
           'subtitle': '${k['kpi_name'] ?? 'KPI'} - ${k['pillar'] ?? ''}',
           'date': _formatDate(k['created_at']?.toString()?.substring(0, 10)),
-          'color': const Color(0xFFD4AF37),
         });
       }
 
-      // Load recent attendance
       final attendance = await _supabase
           .from('attendance')
           .select()
@@ -182,11 +182,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'title': 'Attendance Recorded',
           'subtitle': '${a['source'] ?? 'System'} - ${a['status'] ?? 'Present'}',
           'date': _formatDate(a['sync_date']?.toString()),
-          'color': const Color(0xFF38A169),
         });
       }
 
-      // Sort by date (most recent first)
       activities.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
       
       if (mounted) setState(() => _recentActivities = activities.take(10).toList());
@@ -226,6 +224,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _navigateAndTrack(Widget page, String module) {
+    EngagementService.trackPageView(module: module);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -260,7 +263,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               IconButton(
                 icon: const Icon(Icons.notifications_outlined),
                 onPressed: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationsScreen(user: _userData)));
+                  _navigateAndTrack(NotificationsScreen(user: _userData), 'Notifications');
                 },
               ),
               if (_unreadNotifications > 0)
@@ -290,7 +293,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // === PROFILE HERO CARD ===
+              // Profile Hero Card
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -306,9 +309,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Row(
                   children: [
                     GestureDetector(
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => ProfileScreen(user: _userData)));
-                      },
+                      onTap: () => _navigateAndTrack(ProfileScreen(user: _userData), 'Profile'),
                       child: Container(
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
@@ -354,7 +355,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 20),
 
-              // === TODAY'S STATUS ===
+              // Today's Status
               Row(
                 children: [
                   Icon(Icons.wb_sunny, color: Colors.orange.shade700, size: 18),
@@ -374,7 +375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 16),
 
-              // === STATS GRID ===
+              // Stats Grid
               GridView.count(
                 crossAxisCount: 2,
                 shrinkWrap: true,
@@ -384,29 +385,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 childAspectRatio: 1.5,
                 children: [
                   _statCard('Attendance', 'Present', Icons.check_circle, const Color(0xFF38A169), () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => AttendanceScreen(user: _userData)));
+                    _navigateAndTrack(AttendanceScreen(user: _userData), 'Attendance');
                   }),
                   _statCard('Leave Balance', '24 days', Icons.beach_access, const Color(0xFF3182CE), () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => LeaveScreen(user: _userData)));
+                    _navigateAndTrack(LeaveScreen(user: _userData), 'Leave Requests');
                   }),
                   _statCard('Clock In/Out', 'WTC Abuja', Icons.access_time, const Color(0xFFCC0000), () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => ClockScreen(user: _userData)));
+                    _navigateAndTrack(ClockScreen(user: _userData), 'Clock In/Out');
                   }),
                   _statCard('Performance', 'View KPIs', Icons.trending_up, const Color(0xFFD4AF37), () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => PerformanceFullScreen(user: _userData)));
+                    _navigateAndTrack(PerformanceFullScreen(user: _userData), 'Performance');
                   }),
                   if (isAdmin)
                     _statCard('Report', 'View', Icons.assessment, const Color(0xFF805AD5), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => AttendanceReportScreen(user: _userData)));
+                      _navigateAndTrack(AttendanceReportScreen(user: _userData), 'Attendance Report');
                     }),
                   _statCard('Training', 'Courses', Icons.school, const Color(0xFF3182CE), () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => LMSScreen(user: _userData)));
+                    _navigateAndTrack(LMSScreen(user: _userData), 'Training');
                   }),
                 ],
               ),
               const SizedBox(height: 24),
 
-              // === QUICK ACTIONS ===
+              // Quick Actions
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A))),
               const SizedBox(height: 12),
               SingleChildScrollView(
@@ -414,48 +415,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Row(
                   children: [
                     _actionBtn(Icons.access_time, 'Clock In', const Color(0xFFCC0000), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => ClockScreen(user: _userData)));
+                      _navigateAndTrack(ClockScreen(user: _userData), 'Clock In/Out');
                     }),
                     const SizedBox(width: 12),
                     _actionBtn(Icons.calendar_today, 'Leave', const Color(0xFF3182CE), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => LeaveScreen(user: _userData)));
+                      _navigateAndTrack(LeaveScreen(user: _userData), 'Leave Requests');
                     }),
                     const SizedBox(width: 12),
                     _actionBtn(Icons.people, 'Directory', const Color(0xFF38A169), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const DirectoryScreen()));
+                      _navigateAndTrack(const DirectoryScreen(), 'Directory');
                     }),
                     const SizedBox(width: 12),
                     _actionBtn(Icons.trending_up, 'KPI', const Color(0xFFD4AF37), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => PerformanceFullScreen(user: _userData)));
+                      _navigateAndTrack(PerformanceFullScreen(user: _userData), 'Performance');
                     }),
                     const SizedBox(width: 12),
                     _actionBtn(Icons.school, 'Training', const Color(0xFF3182CE), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => LMSScreen(user: _userData)));
+                      _navigateAndTrack(LMSScreen(user: _userData), 'Training');
+                    }),
+                    const SizedBox(width: 12),
+                    _actionBtn(Icons.chat, 'Chat', const Color(0xFF3182CE), () {
+                      _navigateAndTrack(ChatScreen(user: _userData), 'Team Chat');
+                    }),
+                    const SizedBox(width: 12),
+                    _actionBtn(Icons.article, 'News', const Color(0xFF805AD5), () {
+                      _navigateAndTrack(NewsFeedScreen(user: _userData), 'News Feed');
+                    }),
+                    const SizedBox(width: 12),
+                    _actionBtn(Icons.spa, 'Wellness', const Color(0xFF38A169), () {
+                      _navigateAndTrack(WellnessScreen(user: _userData), 'Wellness');
+                    }),
+                    const SizedBox(width: 12),
+                    _actionBtn(Icons.smart_toy, 'AI Help', const Color(0xFFD4AF37), () {
+                      _navigateAndTrack(AIAssistantScreen(user: _userData), 'AI Assistant');
+                    }),
+                    const SizedBox(width: 12),
+                    _actionBtn(Icons.receipt, 'Payslip', const Color(0xFF1A1A1A), () {
+                      _navigateAndTrack(PayslipScreen(user: _userData), 'Payslips');
                     }),
                     if (isAdmin) ...[
                       const SizedBox(width: 12),
                       _actionBtn(Icons.assessment, 'Report', const Color(0xFF805AD5), () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => AttendanceReportScreen(user: _userData)));
+                        _navigateAndTrack(AttendanceReportScreen(user: _userData), 'Attendance Report');
                       }),
                       const SizedBox(width: 12),
                       _actionBtn(Icons.admin_panel_settings, 'Approvals', const Color(0xFF1A1A1A), () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => AdminClockApprovalsScreen(user: _userData)));
+                        _navigateAndTrack(AdminClockApprovalsScreen(user: _userData), 'Admin Approvals');
                       }),
                     ],
                     const SizedBox(width: 12),
                     _actionBtn(Icons.person, 'Profile', const Color(0xFFD4AF37), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => ProfileScreen(user: _userData)));
+                      _navigateAndTrack(ProfileScreen(user: _userData), 'Profile');
                     }),
                     const SizedBox(width: 12),
                     _actionBtn(Icons.inbox, 'Requests', const Color(0xFFD69E2E), () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => RequestsScreen(user: _userData)));
+                      _navigateAndTrack(RequestsScreen(user: _userData), 'Requests');
                     }),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
 
-              // === RECENT ACTIVITY ===
+              // Recent Activity
               const Text('Recent Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A))),
               const SizedBox(height: 12),
               if (_recentActivities.isEmpty)
@@ -466,9 +487,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFE8DCC8)),
                   ),
-                  child: const Center(
-                    child: Text('No recent activity', style: TextStyle(color: Colors.grey)),
-                  ),
+                  child: const Center(child: Text('No recent activity', style: TextStyle(color: Colors.grey))),
                 )
               else
                 Container(
@@ -498,7 +517,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               const SizedBox(height: 16),
 
-              // === EMPLOYEE ID ===
+              // Employee ID
               Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -557,52 +576,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _drawerItem(Icons.dashboard, 'Dashboard', () => Navigator.pop(context)),
           _drawerItem(Icons.access_time, 'Clock In/Out', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => ClockScreen(user: _userData)));
+            _navigateAndTrack(ClockScreen(user: _userData), 'Clock In/Out');
           }),
           if (isAdmin)
             _drawerItem(Icons.assessment, 'Attendance Report', () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => AttendanceReportScreen(user: _userData)));
+              _navigateAndTrack(AttendanceReportScreen(user: _userData), 'Attendance Report');
             }),
           _drawerItem(Icons.calendar_today, 'Leave Requests', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => LeaveScreen(user: _userData)));
+            _navigateAndTrack(LeaveScreen(user: _userData), 'Leave Requests');
           }),
           _drawerItem(Icons.check_circle, 'Attendance', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => AttendanceScreen(user: _userData)));
+            _navigateAndTrack(AttendanceScreen(user: _userData), 'Attendance');
           }),
           _drawerItem(Icons.trending_up, 'Performance', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => PerformanceFullScreen(user: _userData)));
+            _navigateAndTrack(PerformanceFullScreen(user: _userData), 'Performance');
           }),
           _drawerItem(Icons.school, 'Training & Courses', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => LMSScreen(user: _userData)));
+            _navigateAndTrack(LMSScreen(user: _userData), 'Training');
+          }),
+          _drawerItem(Icons.chat, 'Team Chat', () {
+            Navigator.pop(context);
+            _navigateAndTrack(ChatScreen(user: _userData), 'Team Chat');
+          }),
+          _drawerItem(Icons.article, 'News Feed', () {
+            Navigator.pop(context);
+            _navigateAndTrack(NewsFeedScreen(user: _userData), 'News Feed');
+          }),
+          _drawerItem(Icons.spa, 'Wellness', () {
+            Navigator.pop(context);
+            _navigateAndTrack(WellnessScreen(user: _userData), 'Wellness');
+          }),
+          _drawerItem(Icons.smart_toy, 'AI Assistant', () {
+            Navigator.pop(context);
+            _navigateAndTrack(AIAssistantScreen(user: _userData), 'AI Assistant');
+          }),
+          _drawerItem(Icons.receipt, 'Payslips', () {
+            Navigator.pop(context);
+            _navigateAndTrack(PayslipScreen(user: _userData), 'Payslips');
           }),
           if (isAdmin)
             _drawerItem(Icons.admin_panel_settings, 'Clock Approvals', () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => AdminClockApprovalsScreen(user: _userData)));
+              _navigateAndTrack(AdminClockApprovalsScreen(user: _userData), 'Admin Approvals');
             }),
           _drawerItem(Icons.people, 'Directory', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const DirectoryScreen()));
+            _navigateAndTrack(const DirectoryScreen(), 'Directory');
           }),
           _drawerItem(Icons.inbox, 'My Requests', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => RequestsScreen(user: _userData)));
+            _navigateAndTrack(RequestsScreen(user: _userData), 'Requests');
           }),
           _drawerItem(Icons.notifications, 'Notifications', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationsScreen(user: _userData)));
+            _navigateAndTrack(NotificationsScreen(user: _userData), 'Notifications');
           }),
           _drawerItem(Icons.person, 'My Profile', () {
             Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => ProfileScreen(user: _userData)));
+            _navigateAndTrack(ProfileScreen(user: _userData), 'Profile');
           }),
           const Divider(),
           _drawerItem(Icons.logout, 'Sign Out', () {
+            EngagementService.trackPageView(module: 'Logout', action: 'sign_out');
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const LoginScreen()),
