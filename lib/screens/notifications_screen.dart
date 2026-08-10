@@ -1,3 +1,4 @@
+import '../services/engagement_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -18,6 +19,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Notifications');
     _loadData();
   }
 

@@ -1,3 +1,4 @@
+import '../services/engagement_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -19,6 +20,7 @@ class _AdminClockApprovalsScreenState extends State<AdminClockApprovalsScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Admin Approvals');
     _loadData();
   }
 

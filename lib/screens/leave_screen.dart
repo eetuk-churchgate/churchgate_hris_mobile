@@ -1,3 +1,4 @@
+import '../services/engagement_service.dart';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -16,6 +17,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Leave Requests');
     _loadRequests();
   }
 

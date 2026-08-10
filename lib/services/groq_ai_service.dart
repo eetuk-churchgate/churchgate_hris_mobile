@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class GroqAIService {
-  static const String _apiKey = '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';
+  static const String _apiKey = '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';
   static const String _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static final _supabase = Supabase.instance.client;
   static List<Map<String, String>> _conversationHistory = [];

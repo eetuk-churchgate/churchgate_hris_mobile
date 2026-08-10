@@ -1,3 +1,4 @@
+import '../services/engagement_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
@@ -17,6 +18,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Attendance');
     _loadAttendance();
   }
 

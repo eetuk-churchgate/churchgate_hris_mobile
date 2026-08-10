@@ -1,3 +1,4 @@
+import '../services/engagement_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -27,6 +28,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   @override
   void initState() {
     super.initState();
+    EngagementService.trackPageView(module: 'Attendance Report');
     _loadReport();
   }
 
