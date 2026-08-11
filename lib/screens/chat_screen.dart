@@ -35,7 +35,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _allEmployees = [];
-  
+
   final List<String> _quickEmojis = ['👍', '❤️', '😂', '🎉', '🔥', '💯', '🙏', '😊', '👏', '🚀'];
 
   @override
@@ -96,7 +96,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _loadOnlineUsers() async {
     final data = await ChatService.getOnlineUsers();
-    setState(() => _onlineUsers = data);
+    if (mounted) setState(() => _onlineUsers = data);
   }
 
   Future<void> _openConversation(Map<String, dynamic> conversation) async {
@@ -110,7 +110,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final messages = await ChatService.getMessages(conversation['id']);
     final participants = await ChatService.getParticipants(conversation['id']);
-
     await ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
 
     setState(() {
@@ -131,10 +130,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _typingSubscription = ChatService.subscribeToTyping(conversation['id'], (typing) {
       if (mounted) {
         final empId = typing['employee_id']?.toString() ?? '';
-        final isTyping = typing['is_typing'] == true;
         if (empId != widget.user['employee_id']) {
           setState(() {
-            if (isTyping) {
+            if (typing['is_typing'] == true) {
               _typingUsers[conversation['id']] = typing['employee_name']?.toString() ?? '';
             } else {
               _typingUsers.remove(conversation['id']);
@@ -164,35 +162,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final text = _messageController.text.trim();
     if (text.isEmpty && _replyingTo == null) return;
     if (_activeConversation == null) return;
-
     setState(() => _sending = true);
 
-    try {
-      List<String>? mentionedUsers;
-      
-      final mentionRegex = RegExp(r'@(\w+)');
-      final mentions = mentionRegex.allMatches(text);
-      if (mentions.isNotEmpty) {
-        mentionedUsers = mentions.map((m) => m.group(1)!).toList();
-      }
+    final replyToId = _replyingTo != null ? int.tryParse(_replyingTo!) : null;
 
+    final tempMessage = {
+      'id': DateTime.now().millisecondsSinceEpoch,
+      'conversation_id': _activeConversation!['id'],
+      'sender_id': widget.user['employee_id'] ?? '',
+      'sender_name': widget.user['name'] ?? '',
+      'message': text,
+      'message_type': 'text',
+      'is_read': false,
+      'sent_at': DateTime.now().toIso8601String(),
+    };
+
+    setState(() {
+      _messages.add(tempMessage);
+      _messageController.clear();
+      _replyingTo = null;
+      _replyingToSender = null;
+      _showEmojiPicker = false;
+    });
+    _scrollToBottom();
+
+    try {
       await ChatService.sendMessage(
         conversationId: _activeConversation!['id'],
         senderId: widget.user['employee_id'] ?? '',
         senderName: widget.user['name'] ?? '',
         message: text,
         messageType: 'text',
-        mentionedUsers: mentionedUsers,
-        replyToId: _replyingTo != null ? int.tryParse(_replyingTo!) : null,
+        replyToId: replyToId,
       );
-
-      _messageController.clear();
-      setState(() {
-        _replyingTo = null;
-        _replyingToSender = null;
-        _showEmojiPicker = false;
-      });
-
       await ChatService.setTyping(
         _activeConversation!['id'],
         widget.user['employee_id'] ?? '',
@@ -214,7 +216,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _searchController.clear();
     final employees = await _supabase
         .from('employees')
-        .select('employee_id, first_name, last_name, position, department')
+        .select('employee_id, first_name, last_name, position, department, phone')
         .eq('status', 'Active')
         .neq('employee_id', widget.user['employee_id'] ?? '')
         .order('first_name');
@@ -237,7 +239,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (convId != null) {
       setState(() => _isSearching = false);
       await _loadConversations();
-      
       final conversations = await ChatService.getConversations(widget.user['employee_id'] ?? '');
       final newConv = conversations.firstWhere(
         (c) => c['id'] == convId,
@@ -262,10 +263,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               children: [
                 TextField(
                   controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Group Name',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Group Name', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
                 const Text('Select Members:'),
@@ -273,7 +271,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 SizedBox(
                   height: 200,
                   child: FutureBuilder(
-                    future: _supabase.from('employees').select('employee_id, first_name, last_name').neq('employee_id', widget.user['employee_id']).limit(50),
+                    future: _supabase
+                        .from('employees')
+                        .select('employee_id, first_name, last_name')
+                        .neq('employee_id', widget.user['employee_id']),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                       final employees = List<Map<String, dynamic>>.from(snapshot.data!);
@@ -291,10 +292,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             onChanged: (val) {
                               setDialogState(() {
                                 if (val == true) {
-                                  selectedMembers.add({
-                                    'id': empId,
-                                    'name': empName,
-                                  });
+                                  selectedMembers.add({'id': empId, 'name': empName});
                                 } else {
                                   selectedMembers.removeWhere((m) => m['id'] == empId);
                                 }
@@ -333,14 +331,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _shareToWhatsApp(String message) async {
-    final url = ChatService.getWhatsAppShareUrl(message);
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
   Future<void> _makeCall(String phoneNumber) async {
     final uri = Uri.parse('tel:$phoneNumber');
     if (await canLaunchUrl(uri)) {
@@ -348,79 +338,74 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _addReaction(int messageId) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: _quickEmojis.map((emoji) {
-                  return GestureDetector(
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji);
-                    },
-                    child: Text(emoji, style: const TextStyle(fontSize: 28)),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-            ],
-          ),
+  Future<void> _callEmployee(Map<String, dynamic> emp) async {
+    final phone = emp['phone']?.toString();
+    if (phone != null && phone.isNotEmpty) {
+      await _makeCall(phone);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No phone number available'), backgroundColor: Colors.orange),
         );
-      },
+      }
+    }
+  }
+
+  Future<void> _callParticipant() async {
+    final otherParticipant = _participants.firstWhere(
+      (p) => p['employee_id'] != widget.user['employee_id'],
+      orElse: () => _participants.first,
     );
+    final empId = otherParticipant['employee_id']?.toString() ?? '';
+    try {
+      final empData = await _supabase
+          .from('employees')
+          .select('phone')
+          .eq('employee_id', empId)
+          .maybeSingle();
+      final phone = empData?['phone']?.toString();
+      if (phone != null && phone.isNotEmpty) {
+        await _makeCall(phone);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No phone number available'), backgroundColor: Colors.orange),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not get phone number'), backgroundColor: Colors.orange),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: _activeConversation != null
-            ? _buildChatHeader()
-            : const Text('Team Chat'),
+        title: _activeConversation != null ? _buildChatHeader() : const Text('Team Chat'),
         actions: [
           if (_activeConversation != null) ...[
-            IconButton(
-              icon: const Icon(Icons.phone),
-              onPressed: () {
-                final otherParticipant = _participants.firstWhere(
-                  (p) => p['employee_id'] != widget.user['employee_id'],
-                  orElse: () => _participants.first,
-                );
-                if (otherParticipant.isNotEmpty) {
-                  _makeCall(otherParticipant['employee_id'] ?? '');
-                }
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.videocam),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Video calls coming soon!')),
-                );
-              },
-            ),
+            IconButton(icon: const Icon(Icons.phone), onPressed: _callParticipant),
           ],
           if (_activeConversation == null)
             PopupMenuButton(
               itemBuilder: (ctx) => [
-                const PopupMenuItem(value: 'new_chat', child: ListTile(leading: Icon(Icons.chat), title: Text('New Chat'))),
-                const PopupMenuItem(value: 'new_group', child: ListTile(leading: Icon(Icons.group_add), title: Text('New Group'))),
-                const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.share), title: Text('Share to WhatsApp'))),
+                const PopupMenuItem(
+                  value: 'new_chat',
+                  child: ListTile(leading: Icon(Icons.chat), title: Text('New Chat')),
+                ),
+                const PopupMenuItem(
+                  value: 'new_group',
+                  child: ListTile(leading: Icon(Icons.group_add), title: Text('New Group')),
+                ),
               ],
               onSelected: (val) {
                 if (val == 'new_chat') _startNewChat();
                 if (val == 'new_group') _createGroupChat();
-                if (val == 'whatsapp') _shareToWhatsApp('Join me on Churchgate HRIS!');
               },
             ),
         ],
@@ -462,22 +447,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               CircleAvatar(
                 radius: 16,
                 backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000),
-                child: Text(
-                  name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
+                child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 14)),
               ),
               if (isOnline)
                 Positioned(
                   right: 0,
                   bottom: 0,
                   child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: const BoxDecoration(
-                      color: Colors.green,
-                      shape: BoxShape.circle,
-                    ),
+                    width: 10, height: 10,
+                    decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
                   ),
                 ),
             ],
@@ -498,9 +476,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildConversationsList() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFFCC0000)));
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator(color: Color(0xFFCC0000)));
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -528,10 +504,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           : ListView.builder(
               padding: const EdgeInsets.all(12),
               itemCount: _conversations.length,
-              itemBuilder: (context, index) {
-                final conv = _conversations[index];
-                return _buildConversationTile(conv);
-              },
+              itemBuilder: (context, index) => _buildConversationTile(_conversations[index]),
             ),
     );
   }
@@ -548,13 +521,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        leading: Stack(
-          children: [
-            CircleAvatar(
-              backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000),
-              child: Icon(isGroup ? Icons.group : Icons.person, color: Colors.white, size: 20),
-            ),
-          ],
+        leading: CircleAvatar(
+          backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000),
+          child: Icon(isGroup ? Icons.group : Icons.person, color: Colors.white, size: 20),
         ),
         title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -590,10 +559,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> msg, bool isMe) {
-    final reactions = msg['reactions'] != null
-        ? (msg['reactions'] is String ? jsonDecode(msg['reactions']) : msg['reactions'])
-        : [];
-
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
@@ -618,41 +583,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
                     msg['sender_name'] ?? '',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      color: isMe ? Colors.white70 : const Color(0xFFCC0000),
-                    ),
-                  ),
-                ),
-              if (msg['reply_to_id'] != null)
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  margin: const EdgeInsets.only(bottom: 6),
-                  decoration: BoxDecoration(
-                    color: isMe ? Colors.black26 : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: const Border(left: BorderSide(color: Color(0xFFD4AF37), width: 3)),
-                  ),
-                  child: Text(
-                    'Replying to a message',
-                    style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)),
                   ),
                 ),
               Text(
                 msg['message'] ?? '',
                 style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14),
               ),
-              if (reactions.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Wrap(
-                    spacing: 4,
-                    children: reactions.map<Widget>((r) {
-                      return Text(r['emoji'] ?? '', style: const TextStyle(fontSize: 14));
-                    }).toList(),
-                  ),
-                ),
               const SizedBox(height: 4),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -681,52 +618,78 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _showMessageOptions(Map<String, dynamic> msg) {
     showModalBottomSheet(
       context: context,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.reply),
-                title: const Text('Reply'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  setState(() {
-                    _replyingTo = msg['id']?.toString();
-                    _replyingToSender = msg['sender_name']?.toString();
-                  });
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.emoji_emotions),
-                title: const Text('Add Reaction'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _addReaction(msg['id']);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.share),
-                title: const Text('Share to WhatsApp'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _shareToWhatsApp(msg['message'] ?? '');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Message copied!')),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _replyingTo = msg['id']?.toString();
+                  _replyingToSender = msg['sender_name']?.toString();
+                });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.emoji_emotions),
+              title: const Text('Add Reaction'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _addReaction(msg['id']);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share),
+              title: const Text('Share to WhatsApp'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _shareToWhatsApp(msg['message'] ?? '');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareToWhatsApp(String message) async {
+    final url = ChatService.getWhatsAppShareUrl(message);
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _addReaction(int messageId) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: _quickEmojis.map((emoji) {
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji);
+                  },
+                  child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
@@ -780,10 +743,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   },
                   decoration: InputDecoration(
                     hintText: 'Type a message...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                     filled: true,
                     fillColor: Colors.grey.shade100,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -874,14 +834,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     CircleAvatar(
                       backgroundColor: const Color(0xFFCC0000),
                       child: Text(
-                        '${emp['first_name']?.toString().substring(0, 1) ?? ''}',
+                        emp['first_name']?.toString().substring(0, 1) ?? '',
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),
                     if (isOnline)
                       Positioned(
-                        right: 0,
-                        bottom: 0,
+                        right: 0, bottom: 0,
                         child: Container(
                           width: 10, height: 10,
                           decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
@@ -896,7 +855,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.phone, color: Color(0xFF38A169)),
-                      onPressed: () {},
+                      onPressed: () => _callEmployee(emp),
                     ),
                     IconButton(
                       icon: const Icon(Icons.chat, color: Color(0xFFCC0000)),

@@ -4,7 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class GroqAIService {
-  static const String _apiKey = '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';
+  static String get _apiKey => dotenv.env['GROQ_API_KEY'] ?? '';
   static const String _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static final _supabase = Supabase.instance.client;
   static List<Map<String, String>> _conversationHistory = [];
@@ -90,7 +90,6 @@ class GroqAIService {
     Email: $email
     ''';
     
-    // Real leave balance
     try {
       final leaves = await _supabase
           .from('leave_requests')
@@ -100,7 +99,6 @@ class GroqAIService {
       final usedDays = leaves.fold(0, (sum, l) => sum + ((l['no_of_days'] as num?)?.toInt() ?? 0));
       context += '\nLeave Balance: ${24 - usedDays} days remaining (Used $usedDays days this year)';
       
-      // Pending leaves
       final pending = await _supabase
           .from('leave_requests')
           .select('*')
@@ -111,7 +109,6 @@ class GroqAIService {
       }
     } catch (_) {}
     
-    // Real KPI data
     try {
       final kpis = await _supabase
           .from('performance_data')
@@ -126,7 +123,6 @@ class GroqAIService {
       }
     } catch (_) {}
     
-    // Real training data
     try {
       final training = await _supabase
           .from('lms_enrollments')
@@ -138,7 +134,6 @@ class GroqAIService {
       }
     } catch (_) {}
     
-    // Team birthdays this month
     try {
       final team = await _supabase
           .from('employees')
@@ -156,7 +151,6 @@ class GroqAIService {
       }
     } catch (_) {}
     
-    // Appraisal status
     try {
       final appraisals = await _supabase
           .from('appraisals')
