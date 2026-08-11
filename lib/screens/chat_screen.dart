@@ -119,11 +119,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _messageSubscription = ChatService.subscribeToMessages(conversation['id'], (message) {
       if (mounted) {
-        setState(() {
-          _messages.add(message);
-        });
-        ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
-        _scrollToBottom();
+        final exists = _messages.any((m) => m['id'] == message['id']);
+        if (!exists) {
+          setState(() {
+            _messages.add(Map<String, dynamic>.from(message));
+          });
+          ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
+          _scrollToBottom();
+        }
       }
     });
 
@@ -165,42 +168,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _sending = true);
 
     final replyToId = _replyingTo != null ? int.tryParse(_replyingTo!) : null;
+    final messageText = text;
 
-    final tempMessage = {
-      'id': DateTime.now().millisecondsSinceEpoch,
-      'conversation_id': _activeConversation!['id'],
-      'sender_id': widget.user['employee_id'] ?? '',
-      'sender_name': widget.user['name'] ?? '',
-      'message': text,
-      'message_type': 'text',
-      'is_read': false,
-      'sent_at': DateTime.now().toIso8601String(),
-    };
-
+    _messageController.clear();
     setState(() {
-      _messages.add(tempMessage);
-      _messageController.clear();
       _replyingTo = null;
       _replyingToSender = null;
       _showEmojiPicker = false;
     });
-    _scrollToBottom();
 
     try {
       await ChatService.sendMessage(
         conversationId: _activeConversation!['id'],
         senderId: widget.user['employee_id'] ?? '',
         senderName: widget.user['name'] ?? '',
-        message: text,
+        message: messageText,
         messageType: 'text',
         replyToId: replyToId,
       );
+
       await ChatService.setTyping(
         _activeConversation!['id'],
         widget.user['employee_id'] ?? '',
         widget.user['name'] ?? '',
         false,
       );
+
+      final updatedMessages = await ChatService.getMessages(_activeConversation!['id']);
+      if (mounted) {
+        setState(() {
+          _messages = updatedMessages;
+        });
+        _scrollToBottom();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -216,10 +216,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _searchController.clear();
     final employees = await _supabase
         .from('employees')
-        .select('employee_id, first_name, last_name, position, department, phone')
+        .select('employee_id, first_name, last_name, position, department')
         .eq('status', 'Active')
         .neq('employee_id', widget.user['employee_id'] ?? '')
-        .order('first_name');
+        .order('first_name')
+        .limit(1000);
 
     setState(() {
       _allEmployees = List<Map<String, dynamic>>.from(employees);
