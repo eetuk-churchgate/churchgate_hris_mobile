@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import '../services/notification_service.dart';
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -45,6 +46,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (passwordMatch) {
           if (!mounted) return;
+
+          // Register FCM token for push notifications
+          NotificationService.updateTokenForUser(response['employee_id'] ?? '');
+
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(

@@ -33,6 +33,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _pollTimer;
   String? _replyingTo;
   String? _replyingToSender;
+  String? _replyingToMessage;
   bool _showEmojiPicker = false;
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
@@ -98,7 +99,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _loadConversations() async {
     setState(() => _loading = true);
     final data = await ChatService.getConversations(widget.user['employee_id'] ?? '');
-    // Load participant names for each DM conversation
     for (var conv in data) {
       if (conv['type'] == 'direct') {
         final participants = await ChatService.getParticipants(conv['id']);
@@ -139,6 +139,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() { _messages.add(Map<String, dynamic>.from(message)); });
           ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
           _scrollToBottom();
+        } else {
+          // Update existing message (for read status)
+          setState(() {
+            final index = _messages.indexWhere((m) => m['id'] == message['id']);
+            if (index >= 0) _messages[index] = Map<String, dynamic>.from(message);
+          });
         }
       }
     });
@@ -181,7 +187,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final messageText = text;
 
     _messageController.clear();
-    setState(() { _replyingTo = null; _replyingToSender = null; _showEmojiPicker = false; });
+    setState(() { _replyingTo = null; _replyingToSender = null; _replyingToMessage = null; _showEmojiPicker = false; });
 
     try {
       await ChatService.sendMessage(
@@ -326,37 +332,150 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ]);
   }
 
+  // Find a message by ID for reply reference
+  Map<String, dynamic>? _findMessageById(String? id) {
+    if (id == null) return null;
+    try {
+      return _messages.firstWhere((m) => m['id'].toString() == id.toString());
+    } catch (_) {
+      return null;
+    }
+  }
+
   Widget _buildMessageBubble(Map<String, dynamic> msg, bool isMe) {
-    return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: GestureDetector(onLongPress: () => _showMessageOptions(msg), child: Container(margin: const EdgeInsets.only(bottom: 8), constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: isMe ? const Color(0xFFCC0000) : Colors.white, borderRadius: BorderRadius.circular(16).copyWith(bottomRight: isMe ? const Radius.circular(4) : null, bottomLeft: isMe ? null : const Radius.circular(4)), border: isMe ? null : Border.all(color: const Color(0xFFE8DCC8))), child: Column(crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
-      if (!isMe) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg['sender_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)))),
-      Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)), const SizedBox(height: 4),
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(DateFormat('HH:mm').format(DateTime.parse(msg['sent_at'].toString())), style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey)),
-        if (isMe) ...[const SizedBox(width: 4), Icon(msg['is_read'] == true ? Icons.done_all : Icons.done, size: 14, color: msg['is_read'] == true ? Colors.blue : Colors.white54)],
-      ]),
-    ]))));
+    final reactions = msg['reactions'] != null
+        ? (msg['reactions'] is String ? jsonDecode(msg['reactions']) : msg['reactions'])
+        : [];
+
+    // Find replied message
+    Map<String, dynamic>? repliedMsg;
+    if (msg['reply_to_id'] != null) {
+      repliedMsg = _findMessageById(msg['reply_to_id'].toString());
+    }
+
+    return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: GestureDetector(
+      onLongPress: () => _showMessageOptions(msg),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFFCC0000) : Colors.white,
+          borderRadius: BorderRadius.circular(16).copyWith(bottomRight: isMe ? const Radius.circular(4) : null, bottomLeft: isMe ? null : const Radius.circular(4)),
+          border: isMe ? null : Border.all(color: const Color(0xFFE8DCC8)),
+        ),
+        child: Column(crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
+          if (!isMe) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg['sender_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)))),
+          // Reply reference
+          if (repliedMsg != null)
+            Container(
+              padding: const EdgeInsets.all(8),
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: isMe ? Colors.black26 : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: const Border(left: BorderSide(color: Color(0xFFD4AF37), width: 3)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(repliedMsg['sender_name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: isMe ? Colors.white70 : const Color(0xFFCC0000))),
+                Text(repliedMsg['message'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: isMe ? Colors.white54 : Colors.grey.shade700)),
+              ]),
+            ),
+          Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)),
+          // Reactions display
+          if (reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Wrap(spacing: 4, children: reactions.map<Widget>((r) => Text(r['emoji'] ?? '', style: const TextStyle(fontSize: 14))).toList()),
+            ),
+          const SizedBox(height: 4),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(DateFormat('HH:mm').format(DateTime.parse(msg['sent_at'].toString())), style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey)),
+            if (isMe) ...[
+              const SizedBox(width: 4),
+              Icon(msg['is_read'] == true ? Icons.done_all : Icons.done, size: 14, color: msg['is_read'] == true ? Colors.blue : Colors.white54),
+            ],
+          ]),
+        ]),
+      ),
+    ));
   }
 
   void _showMessageOptions(Map<String, dynamic> msg) {
     showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(leading: const Icon(Icons.reply), title: const Text('Reply'), onTap: () { Navigator.pop(ctx); setState(() { _replyingTo = msg['id']?.toString(); _replyingToSender = msg['sender_name']?.toString(); }); }),
-      ListTile(leading: const Icon(Icons.emoji_emotions), title: const Text('Add Reaction'), onTap: () { Navigator.pop(ctx); _addReaction(msg['id']); }),
-      ListTile(leading: const Icon(Icons.share), title: const Text('Share to WhatsApp'), onTap: () { Navigator.pop(ctx); _shareToWhatsApp(msg['message'] ?? ''); }),
+      ListTile(
+        leading: const Icon(Icons.reply), title: const Text('Reply'),
+        onTap: () {
+          Navigator.pop(ctx);
+          setState(() {
+            _replyingTo = msg['id']?.toString();
+            _replyingToSender = msg['sender_name']?.toString();
+            _replyingToMessage = msg['message']?.toString();
+          });
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.emoji_emotions), title: const Text('Add Reaction'),
+        onTap: () {
+          Navigator.pop(ctx);
+          _addReaction(msg['id']);
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.share), title: const Text('Share to WhatsApp'),
+        onTap: () { Navigator.pop(ctx); _shareToWhatsApp(msg['message'] ?? ''); },
+      ),
     ])));
   }
 
-  Future<void> _shareToWhatsApp(String message) async { final uri = Uri.parse(ChatService.getWhatsAppShareUrl(message)); if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); }
+  Future<void> _shareToWhatsApp(String message) async {
+    final uri = Uri.parse(ChatService.getWhatsAppShareUrl(message));
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   void _addReaction(int messageId) {
-    showModalBottomSheet(context: context, builder: (ctx) => Container(padding: const EdgeInsets.all(16), child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 12),
-      Wrap(spacing: 12, runSpacing: 12, children: _quickEmojis.map((emoji) => GestureDetector(onTap: () { Navigator.pop(ctx); ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji); }, child: Text(emoji, style: const TextStyle(fontSize: 28)))).toList()),
-    ])));
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 12, runSpacing: 12, children: _quickEmojis.map((emoji) {
+            return GestureDetector(
+              onTap: () async {
+                Navigator.pop(ctx);
+                await ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji);
+                // Refresh messages to show reaction
+                if (_activeConversation != null && mounted) {
+                  final updated = await ChatService.getMessages(_activeConversation!['id']);
+                  if (mounted) setState(() => _messages = updated);
+                }
+              },
+              child: Text(emoji, style: const TextStyle(fontSize: 28)),
+            );
+          }).toList()),
+          const SizedBox(height: 20),
+        ]),
+      ),
+    );
   }
 
   Widget _buildMessageInput() {
     return Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)]), child: Column(children: [
-      if (_replyingTo != null) Container(padding: const EdgeInsets.all(8), margin: const EdgeInsets.only(bottom: 8), decoration: BoxDecoration(color: const Color(0xFFD4AF37).withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(children: [const Icon(Icons.reply, size: 16, color: Color(0xFFD4AF37)), const SizedBox(width: 8), Expanded(child: Text('Replying to $_replyingToSender', style: const TextStyle(fontSize: 12))), GestureDetector(onTap: () => setState(() { _replyingTo = null; _replyingToSender = null; }), child: const Icon(Icons.close, size: 16))])),
+      if (_replyingTo != null)
+        Container(
+          padding: const EdgeInsets.all(8), margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(color: const Color(0xFFD4AF37).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          child: Row(children: [
+            const Icon(Icons.reply, size: 16, color: Color(0xFFD4AF37)), const SizedBox(width: 8),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Replying to $_replyingToSender', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              if (_replyingToMessage != null) Text(_replyingToMessage!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+            ])),
+            GestureDetector(onTap: () => setState(() { _replyingTo = null; _replyingToSender = null; _replyingToMessage = null; }), child: const Icon(Icons.close, size: 16)),
+          ]),
+        ),
       Row(children: [
         IconButton(icon: Icon(_showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions, color: const Color(0xFFD4AF37)), onPressed: () => setState(() => _showEmojiPicker = !_showEmojiPicker)),
         Expanded(child: TextField(controller: _messageController, onChanged: (val) { if (_activeConversation != null) ChatService.setTyping(_activeConversation!['id'], widget.user['employee_id'] ?? '', widget.user['name'] ?? '', val.isNotEmpty); }, decoration: InputDecoration(hintText: 'Type a message...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none), filled: true, fillColor: Colors.grey.shade100, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), maxLines: 3, minLines: 1)),

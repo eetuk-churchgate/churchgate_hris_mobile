@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "864827271573",
+    "project_id": "churchgate-hris",
+    "storage_bucket": "churchgate-hris.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:864827271573:android:0ac3e2864d8d27ad902e9c",
+        "android_client_info": {
+          "package_name": "com.example.churchgate_hris_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdWLl_iN0WE4fjjikuLgcO3WWTVAY4qkc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
