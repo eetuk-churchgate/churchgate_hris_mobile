@@ -48,7 +48,9 @@ class _LoginScreenState extends State<LoginScreen> {
           if (!mounted) return;
 
           // Register FCM token for push notifications
-          NotificationService.updateTokenForUser(response['employee_id'] ?? '');
+          try {
+            NotificationService.updateTokenForUser(response['employee_id'] ?? '');
+          } catch (_) {}
 
           Navigator.pushReplacement(
             context,
