@@ -11,21 +11,24 @@ void main() async {
 
   await dotenv.load(fileName: ".env");
 
-  await Firebase.initializeApp(
-    options: const FirebaseOptions(
-      apiKey: 'AIzaSyBdWLl_iN0WE4fjjikuLgcO3WWTVAY4qkc',
-      appId: '1:864827271573:android:0ac3e2864d8d27ad902e9c',
-      messagingSenderId: '864827271573',
-      projectId: 'churchgate-hris',
-    ),
-  );
+  try {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: 'AIzaSyBdWLl_iN0WE4fjjikuLgcO3WWTVAY4qkc',
+        appId: '1:864827271573:android:0ac3e2864d8d27ad902e9c',
+        messagingSenderId: '864827271573',
+        projectId: 'churchgate-hris',
+      ),
+    );
+    await NotificationService.initialize();
+  } catch (e) {
+    // Firebase not available - continue without push notifications
+  }
 
   await Supabase.initialize(
     url: 'https://pobfydvkjzhkmhuqwmtf.supabase.co',
     anonKey: 'sb_publishable_iDYmuO5jfqmzydDPgNhL3w_b21rWMhm',
   );
-
-  await NotificationService.initialize();
 
   runApp(const ChurchgateHRIS());
 }
