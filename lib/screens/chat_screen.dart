@@ -98,6 +98,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _loadConversations() async {
     setState(() => _loading = true);
     final data = await ChatService.getConversations(widget.user['employee_id'] ?? '');
+    // Load participant names for each DM conversation
+    for (var conv in data) {
+      if (conv['type'] == 'direct') {
+        final participants = await ChatService.getParticipants(conv['id']);
+        final other = participants.firstWhere(
+          (p) => p['employee_id'] != widget.user['employee_id'],
+          orElse: () => participants.isNotEmpty ? participants.first : {'employee_name': 'Unknown'},
+        );
+        conv['display_name'] = other['employee_name'] ?? 'Unknown';
+      } else {
+        conv['display_name'] = conv['name'] ?? 'Group';
+      }
+    }
     setState(() { _conversations = data; _loading = false; });
   }
 
@@ -294,10 +307,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildConversationTile(Map<String, dynamic> conv) {
     final isGroup = conv['type'] == 'group';
-    final name = isGroup ? (conv['name'] ?? 'Group') : 'Chat';
+    final name = conv['display_name'] ?? (isGroup ? (conv['name'] ?? 'Group') : 'Chat');
     final lastMsg = conv['last_message'] ?? 'No messages yet';
     final time = conv['last_message_at'] != null ? DateFormat('HH:mm').format(DateTime.parse(conv['last_message_at'].toString())) : '';
-    return Card(margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), child: ListTile(leading: CircleAvatar(backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000), child: Icon(isGroup ? Icons.group : Icons.person, color: Colors.white, size: 20)), title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)), subtitle: Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)), trailing: Text(time, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)), onTap: () => _openConversation(conv)));
+    return Card(margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), child: ListTile(
+      leading: CircleAvatar(backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000), child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 16))),
+      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+      trailing: Text(time, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+      onTap: () => _openConversation(conv),
+    ));
   }
 
   Widget _buildChatView() {
@@ -311,7 +330,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: GestureDetector(onLongPress: () => _showMessageOptions(msg), child: Container(margin: const EdgeInsets.only(bottom: 8), constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: isMe ? const Color(0xFFCC0000) : Colors.white, borderRadius: BorderRadius.circular(16).copyWith(bottomRight: isMe ? const Radius.circular(4) : null, bottomLeft: isMe ? null : const Radius.circular(4)), border: isMe ? null : Border.all(color: const Color(0xFFE8DCC8))), child: Column(crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
       if (!isMe) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg['sender_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)))),
       Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)), const SizedBox(height: 4),
-      Row(mainAxisSize: MainAxisSize.min, children: [Text(DateFormat('HH:mm').format(DateTime.parse(msg['sent_at'].toString())), style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey)), if (isMe) ...[const SizedBox(width: 4), Icon(msg['is_read'] == true ? Icons.done_all : Icons.done, size: 14, color: msg['is_read'] == true ? Colors.blue : Colors.white54)]]),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(DateFormat('HH:mm').format(DateTime.parse(msg['sent_at'].toString())), style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey)),
+        if (isMe) ...[const SizedBox(width: 4), Icon(msg['is_read'] == true ? Icons.done_all : Icons.done, size: 14, color: msg['is_read'] == true ? Colors.blue : Colors.white54)],
+      ]),
     ]))));
   }
 
