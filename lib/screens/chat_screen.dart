@@ -76,12 +76,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (_activeConversation == null || !mounted) return;
       try {
         final latest = await ChatService.getMessages(_activeConversation!['id']);
-        if (mounted && latest.length > _messages.length) {
-          setState(() => _messages = latest);
+        if (mounted) {
+          setState(() {
+            // Update all messages with latest data (including read status)
+            for (var newMsg in latest) {
+              final index = _messages.indexWhere((m) => m['id'] == newMsg['id']);
+              if (index >= 0) {
+                _messages[index] = newMsg;
+              } else {
+                _messages.add(newMsg);
+              }
+            }
+          });
           _scrollToBottom();
         }
       } catch (_) {}
@@ -139,12 +149,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() { _messages.add(Map<String, dynamic>.from(message)); });
           ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
           _scrollToBottom();
-        } else {
-          // Update existing message (for read status)
-          setState(() {
-            final index = _messages.indexWhere((m) => m['id'] == message['id']);
-            if (index >= 0) _messages[index] = Map<String, dynamic>.from(message);
-          });
         }
       }
     });
@@ -197,9 +201,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         message: messageText, messageType: 'text', replyToId: replyToId,
       );
       await ChatService.setTyping(_activeConversation!['id'], widget.user['employee_id'] ?? '', widget.user['name'] ?? '', false);
-
-      final updatedMessages = await ChatService.getMessages(_activeConversation!['id']);
-      if (mounted) { setState(() => _messages = updatedMessages); _scrollToBottom(); }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red));
     }
@@ -332,7 +333,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ]);
   }
 
-  // Find a message by ID for reply reference
   Map<String, dynamic>? _findMessageById(String? id) {
     if (id == null) return null;
     try {
@@ -347,7 +347,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ? (msg['reactions'] is String ? jsonDecode(msg['reactions']) : msg['reactions'])
         : [];
 
-    // Find replied message
     Map<String, dynamic>? repliedMsg;
     if (msg['reply_to_id'] != null) {
       repliedMsg = _findMessageById(msg['reply_to_id'].toString());
@@ -366,7 +365,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         child: Column(crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
           if (!isMe) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg['sender_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)))),
-          // Reply reference
           if (repliedMsg != null)
             Container(
               padding: const EdgeInsets.all(8),
@@ -382,7 +380,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ]),
             ),
           Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)),
-          // Reactions display
           if (reactions.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -446,7 +443,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onTap: () async {
                 Navigator.pop(ctx);
                 await ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji);
-                // Refresh messages to show reaction
                 if (_activeConversation != null && mounted) {
                   final updated = await ChatService.getMessages(_activeConversation!['id']);
                   if (mounted) setState(() => _messages = updated);
