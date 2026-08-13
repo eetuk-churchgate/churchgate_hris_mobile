@@ -5,17 +5,17 @@ import 'dart:math';
 class LocationService {
   static final _supabase = Supabase.instance.client;
 
-  // Office locations with 25m geofence radius
+  // Office locations with 40m geofence radius
   static const Map<String, Map<String, dynamic>> officeLocations = {
     'WTC Abuja': {
       'latitude': 9.0488599,
       'longitude': 7.4730175,
-      'radius': 25,
+      'radius': 40,
     },
     'Lagos Towers': {
       'latitude': 6.4353608,
       'longitude': 3.4275034,
-      'radius': 25,
+      'radius': 40,
     },
   };
 
@@ -77,18 +77,12 @@ class LocationService {
     String status;
     String message;
     
-    if (locationName != null && isNetwork) {
+    if (locationName != null) {
       status = 'Approved';
-      message = '✅ $clockType verified at $locationName (GPS + Network)';
-    } else if (locationName != null && !isNetwork) {
-      status = 'Pending';
-      message = '⚠️ GPS verified at $locationName but not on office network. $clockType submitted for approval.';
-    } else if (locationName == null && isNetwork) {
-      status = 'Pending';
-      message = '⚠️ On office network but outside geofence. $clockType submitted for approval.';
+      message = '✅ $clockType verified at $locationName (GPS)';
     } else {
       status = 'Pending';
-      message = '❌ Outside office geofence and not on office network. $clockType submitted for approval.';
+      message = '⚠️ Outside office geofence. $clockType submitted for approval.';
     }
     
     final data = {

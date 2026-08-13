@@ -26,6 +26,7 @@ import 'desk_booking_screen.dart';
 import 'admin_survey_manager.dart';
 import 'admin_room_manager.dart';
 import '../services/engagement_service.dart';
+import '../services/update_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -48,6 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     EngagementService.trackPageView(module: 'Dashboard');
+    UpdateService.checkForUpdate();
     _loadFullProfile();
     _loadProfilePicture();
     _loadPendingCounts();

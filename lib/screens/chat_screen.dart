@@ -82,7 +82,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final latest = await ChatService.getMessages(_activeConversation!['id']);
         if (mounted) {
           setState(() {
-            // Update all messages with latest data (including read status)
             for (var newMsg in latest) {
               final index = _messages.indexWhere((m) => m['id'] == newMsg['id']);
               if (index >= 0) {
@@ -352,6 +351,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       repliedMsg = _findMessageById(msg['reply_to_id'].toString());
     }
 
+    final isEdited = msg['is_edited'] == true;
+
     return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: GestureDetector(
       onLongPress: () => _showMessageOptions(msg),
       child: Container(
@@ -387,6 +388,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           const SizedBox(height: 4),
           Row(mainAxisSize: MainAxisSize.min, children: [
+            if (isEdited) Text('edited ', style: TextStyle(fontSize: 9, color: isMe ? Colors.white54 : Colors.grey)),
             Text(DateFormat('HH:mm').format(DateTime.parse(msg['sent_at'].toString())), style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : Colors.grey)),
             if (isMe) ...[
               const SizedBox(width: 4),
@@ -399,6 +401,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _showMessageOptions(Map<String, dynamic> msg) {
+    final isMe = msg['sender_id'] == widget.user['employee_id'];
     showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
       ListTile(
         leading: const Icon(Icons.reply), title: const Text('Reply'),
@@ -418,11 +421,84 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _addReaction(msg['id']);
         },
       ),
+      if (isMe) ...[
+        ListTile(
+          leading: const Icon(Icons.edit, color: Color(0xFF3182CE)), title: const Text('Edit Message'),
+          onTap: () {
+            Navigator.pop(ctx);
+            _editMessage(msg);
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.delete, color: Colors.red), title: const Text('Delete Message'),
+          onTap: () {
+            Navigator.pop(ctx);
+            _deleteMessage(msg);
+          },
+        ),
+      ],
       ListTile(
         leading: const Icon(Icons.share), title: const Text('Share to WhatsApp'),
         onTap: () { Navigator.pop(ctx); _shareToWhatsApp(msg['message'] ?? ''); },
       ),
     ])));
+  }
+
+  Future<void> _editMessage(Map<String, dynamic> msg) async {
+    final controller = TextEditingController(text: msg['message'] ?? '');
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Message'),
+        content: TextField(controller: controller, maxLines: 3, decoration: const InputDecoration(border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _supabase.from('chat_messages_new').update({
+                'message': controller.text.trim(),
+                'is_edited': true,
+              }).eq('id', msg['id']);
+              // Refresh messages
+              if (_activeConversation != null && mounted) {
+                final updated = await ChatService.getMessages(_activeConversation!['id']);
+                if (mounted) setState(() => _messages = updated);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFCC0000)),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteMessage(Map<String, dynamic> msg) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Message?'),
+        content: const Text('This message will be permanently deleted.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _supabase.from('chat_messages_new').delete().eq('id', msg['id']);
+      if (_activeConversation != null && mounted) {
+        final updated = await ChatService.getMessages(_activeConversation!['id']);
+        if (mounted) setState(() => _messages = updated);
+      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message deleted'), backgroundColor: Colors.orange));
+    }
   }
 
   Future<void> _shareToWhatsApp(String message) async {
