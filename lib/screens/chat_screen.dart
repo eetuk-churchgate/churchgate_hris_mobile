@@ -38,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _allEmployees = [];
+  bool _isUserAtBottom = true;
 
   final List<String> _quickEmojis = ['👍', '❤️', '😂', '🎉', '🔥', '💯', '🙏', '😊', '👏', '🚀'];
 
@@ -45,9 +46,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onScroll);
     _loadConversations();
     _loadOnlineUsers();
     _setUserOnline();
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients) {
+      final atBottom = _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 50;
+      if (atBottom != _isUserAtBottom) {
+        setState(() => _isUserAtBottom = atBottom);
+      }
+    }
   }
 
   @override
@@ -91,7 +102,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               }
             }
           });
-          _scrollToBottom();
+          if (_isUserAtBottom) _scrollToBottom();
         }
       } catch (_) {}
     });
@@ -131,7 +142,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _openConversation(Map<String, dynamic> conversation) async {
     _pollTimer?.cancel();
     
-    setState(() { _activeConversation = conversation; _messages = []; });
+    setState(() { _activeConversation = conversation; _messages = []; _isUserAtBottom = true; });
     _messageSubscription?.unsubscribe();
     _typingSubscription?.unsubscribe();
 
@@ -147,7 +158,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (!exists) {
           setState(() { _messages.add(Map<String, dynamic>.from(message)); });
           ChatService.markAsRead(conversation['id'], widget.user['employee_id'] ?? '');
-          _scrollToBottom();
+          if (_isUserAtBottom) _scrollToBottom();
         }
       }
     });
@@ -200,6 +211,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         message: messageText, messageType: 'text', replyToId: replyToId,
       );
       await ChatService.setTyping(_activeConversation!['id'], widget.user['employee_id'] ?? '', widget.user['name'] ?? '', false);
+      setState(() => _isUserAtBottom = true);
+      if (_isUserAtBottom) _scrollToBottom();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red));
     }
@@ -296,10 +309,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final isGroup = _activeConversation!['type'] == 'group';
     final name = isGroup ? _activeConversation!['name'] ?? 'Group' : _participants.firstWhere((p) => p['employee_id'] != widget.user['employee_id'], orElse: () => {'employee_name': 'Unknown'})['employee_name'] ?? 'Unknown';
     final otherEmpId = isGroup ? null : _participants.firstWhere((p) => p['employee_id'] != widget.user['employee_id'], orElse: () => {'employee_id': null})['employee_id'];
-    final isOnline = otherEmpId != null && _onlineUsers.any((u) => u['employee_id'] == otherEmpId);
+    final otherUser = otherEmpId != null ? _onlineUsers.firstWhere((u) => u['employee_id'] == otherEmpId, orElse: () => {}) : {};
+    final isOnline = otherEmpId != null && otherUser.isNotEmpty;
+    final lastSeen = otherUser['last_seen']?.toString();
+    
+    String subtitle = '';
+    if (isOnline) {
+      subtitle = 'Online';
+    } else if (lastSeen != null && lastSeen.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(lastSeen);
+        subtitle = 'Last seen ${DateFormat('MMM d, h:mm a').format(dt)}';
+      } catch (_) {
+        subtitle = 'Offline';
+      }
+    } else {
+      subtitle = 'Offline';
+    }
+
     return GestureDetector(onTap: () { _pollTimer?.cancel(); setState(() => _activeConversation = null); }, child: Row(children: [
       Stack(children: [CircleAvatar(radius: 16, backgroundColor: isGroup ? const Color(0xFFD4AF37) : const Color(0xFFCC0000), child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 14))), if (isOnline) Positioned(right: 0, bottom: 0, child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)))]),
-      const SizedBox(width: 10), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)), if (_typingUsers.containsKey(_activeConversation!['id'])) Text('${_typingUsers[_activeConversation!['id']]} typing...', style: TextStyle(fontSize: 10, color: Colors.green.shade300))]),
+      const SizedBox(width: 10), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        if (_typingUsers.containsKey(_activeConversation!['id']))
+          Text('${_typingUsers[_activeConversation!['id']]} typing...', style: TextStyle(fontSize: 10, color: Colors.green.shade300))
+        else
+          Text(subtitle, style: TextStyle(fontSize: 10, color: isOnline ? Colors.green : Colors.grey.shade500)),
+      ]),
     ]));
   }
 
@@ -325,9 +361,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ));
   }
 
+  String _getDateLabel(String? dateTimeStr) {
+    if (dateTimeStr == null) return '';
+    try {
+      final dt = DateTime.parse(dateTimeStr);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final msgDate = DateTime(dt.year, dt.month, dt.day);
+      final diff = today.difference(msgDate).inDays;
+      
+      if (diff == 0) return 'Today';
+      if (diff == 1) return 'Yesterday';
+      if (diff < 7) return DateFormat('EEEE').format(dt); // Day name
+      return DateFormat('MMM d, yyyy').format(dt);
+    } catch (_) {
+      return '';
+    }
+  }
+
   Widget _buildChatView() {
     return Column(children: [
-      Expanded(child: GestureDetector(onTap: () => setState(() => _showEmojiPicker = false), child: ListView.builder(controller: _scrollController, padding: const EdgeInsets.all(12), itemCount: _messages.length, itemBuilder: (context, index) { final msg = _messages[index]; return _buildMessageBubble(msg, msg['sender_id'] == widget.user['employee_id']); }))),
+      Expanded(child: GestureDetector(onTap: () => setState(() => _showEmojiPicker = false), child: ListView.builder(controller: _scrollController, padding: const EdgeInsets.all(12), itemCount: _messages.length, itemBuilder: (context, index) {
+        final msg = _messages[index];
+        final showDate = index == 0 || _getDateLabel(msg['sent_at']?.toString()) != _getDateLabel(_messages[index - 1]['sent_at']?.toString());
+        return Column(children: [
+          if (showDate) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(12)), child: Text(_getDateLabel(msg['sent_at']?.toString()), style: TextStyle(fontSize: 11, color: Colors.grey.shade600))))),
+          _buildMessageBubble(msg, msg['sender_id'] == widget.user['employee_id']),
+        ]);
+      }))),
       _buildMessageInput(), if (_showEmojiPicker) _buildEmojiPicker(),
     ]);
   }
@@ -460,7 +521,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 'message': controller.text.trim(),
                 'is_edited': true,
               }).eq('id', msg['id']);
-              // Refresh messages
               if (_activeConversation != null && mounted) {
                 final updated = await ChatService.getMessages(_activeConversation!['id']);
                 if (mounted) setState(() => _messages = updated);

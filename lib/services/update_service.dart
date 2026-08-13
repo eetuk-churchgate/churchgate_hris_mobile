@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 class UpdateService {
   static final _supabase = Supabase.instance.client;
-  static const int _currentVersionCode = 1;
+  static const int _currentVersionCode = 2;
 
   static Future<void> checkForUpdate(BuildContext? context) async {
     try {
