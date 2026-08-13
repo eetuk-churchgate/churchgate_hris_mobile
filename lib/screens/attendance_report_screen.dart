@@ -200,7 +200,6 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         csv.writeln('"${record['employee_name']}","${record['employee_id']}","${record['biometric_in']}","${record['biometric_out']}","${record['biometric_hours']}","${record['gps_in']}","${record['gps_out']}","${record['gps_location']}","${record['total_hours']}","${record['final_status']}"');
       }
 
-      // Add summary
       csv.writeln('');
       csv.writeln('Summary');
       csv.writeln('Date,${DateFormat('yyyy-MM-dd').format(_selectedDate)}');
@@ -215,11 +214,17 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       final file = File('${directory.path}/$fileName');
       await file.writeAsString(csv.toString());
 
-      // Share the file
+      // Share the file with iOS position origin fix
       if (mounted) {
+        final box = context.findRenderObject() as RenderBox?;
+        final sharePosition = box != null
+            ? box.localToGlobal(Offset.zero) & box.size
+            : const Rect.fromLTWH(0, 0, 375, 812);
+
         await Share.shareXFiles(
           [XFile(file.path)],
           text: 'Attendance Report - ${DateFormat('MMM d, yyyy').format(_selectedDate)}',
+          sharePositionOrigin: sharePosition,
         );
         
         ScaffoldMessenger.of(context).showSnackBar(
