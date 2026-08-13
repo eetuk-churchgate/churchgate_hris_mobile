@@ -49,7 +49,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     EngagementService.trackPageView(module: 'Dashboard');
-    UpdateService.checkForUpdate();
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) UpdateService.checkForUpdate(context);
+    });
     _loadFullProfile();
     _loadProfilePicture();
     _loadPendingCounts();
