@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
+import 'dart:io';
 
 class ChatService {
   static final _supabase = Supabase.instance.client;
@@ -20,7 +21,7 @@ class ChatService {
     return conversations;
   }
 
-  static Future<List<Map<String, dynamic>>> getMessages(int conversationId, {int limit = 50}) async {
+  static Future<List<Map<String, dynamic>>> getMessages(int conversationId, {int limit = 100}) async {
     final data = await _supabase
         .from('chat_messages_new')
         .select('*')
@@ -29,6 +30,25 @@ class ChatService {
         .limit(limit);
 
     return List<Map<String, dynamic>>.from(data).reversed.toList();
+  }
+
+  static Future<String?> uploadFile(File file, String fileName, String employeeId) async {
+    try {
+      final fileExt = fileName.split('.').last;
+      final uniqueName = '${employeeId}_${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+
+      await _supabase.storage
+          .from('chat-attachments')
+          .upload(uniqueName, file);
+
+      final url = _supabase.storage
+          .from('chat-attachments')
+          .getPublicUrl(uniqueName);
+
+      return url;
+    } catch (e) {
+      return null;
+    }
   }
 
   static Future<Map<String, dynamic>?> sendMessage({
@@ -58,10 +78,14 @@ class ChatService {
         .select()
         .single();
 
+    final lastMsg = message.isNotEmpty 
+        ? message 
+        : (messageType == 'image' ? '📷 Image' : messageType == 'voice' ? '🎤 Voice message' : '📎 File');
+
     await _supabase
         .from('chat_conversations')
         .update({
-          'last_message': message,
+          'last_message': lastMsg,
           'last_message_at': DateTime.now().toIso8601String(),
         })
         .eq('id', conversationId);
@@ -134,7 +158,6 @@ class ChatService {
     }
 
     await _supabase.from('chat_participants').insert(participants);
-
     return convId;
   }
 
@@ -143,7 +166,6 @@ class ChatService {
         .from('chat_participants')
         .select('*')
         .eq('conversation_id', conversationId);
-
     return List<Map<String, dynamic>>.from(data);
   }
 
@@ -165,7 +187,6 @@ class ChatService {
   static Future<int> getUnreadCount(String employeeId) async {
     final conversations = await getConversations(employeeId);
     int count = 0;
-
     for (var conv in conversations) {
       final unread = await _supabase
           .from('chat_messages_new')
@@ -173,10 +194,8 @@ class ChatService {
           .eq('conversation_id', conv['id'])
           .neq('sender_id', employeeId)
           .eq('is_read', false);
-
       count += unread.length;
     }
-
     return count;
   }
 
@@ -195,7 +214,6 @@ class ChatService {
         .from('chat_presence')
         .select('*')
         .eq('is_online', true);
-
     return List<Map<String, dynamic>>.from(data);
   }
 
@@ -208,9 +226,7 @@ class ChatService {
         'is_typing': isTyping,
         'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'conversation_id, employee_id');
-    } catch (e) {
-      // Ignore typing errors
-    }
+    } catch (e) {}
   }
 
   static RealtimeChannel subscribeToMessages(int conversationId, Function(Map<String, dynamic>) onMessage) {

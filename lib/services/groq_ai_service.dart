@@ -52,7 +52,7 @@ class GroqAIService {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'llama-3.3-70b-versatile',
+          'model': 'openai/gpt-oss-20b',
           'messages': messages,
           'temperature': 0.5,
           'max_tokens': 500,

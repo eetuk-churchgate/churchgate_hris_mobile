@@ -3,7 +3,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/chat_service.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -19,6 +26,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
+  final _audioRecorder = Record();
+  final _audioPlayer = AudioPlayer();
 
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _messages = [];
@@ -36,9 +45,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _replyingToMessage;
   bool _showEmojiPicker = false;
   bool _isSearching = false;
+  bool _isUserAtBottom = true;
+  bool _isRecording = false;
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _allEmployees = [];
-  bool _isUserAtBottom = true;
 
   final List<String> _quickEmojis = ['👍', '❤️', '😂', '🎉', '🔥', '💯', '🙏', '😊', '👏', '🚀'];
 
@@ -70,6 +80,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _messageSubscription?.unsubscribe();
     _typingSubscription?.unsubscribe();
     _pollTimer?.cancel();
+    _audioPlayer.dispose();
     _setUserOffline();
     super.dispose();
   }
@@ -141,7 +152,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _openConversation(Map<String, dynamic> conversation) async {
     _pollTimer?.cancel();
-    
     setState(() { _activeConversation = conversation; _messages = []; _isUserAtBottom = true; });
     _messageSubscription?.unsubscribe();
     _typingSubscription?.unsubscribe();
@@ -217,6 +227,80 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red));
     }
     setState(() => _sending = false);
+  }
+
+  Future<void> _pickAndSendImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked != null && _activeConversation != null) {
+      final file = File(picked.path);
+      final url = await ChatService.uploadFile(file, picked.name, widget.user['employee_id'] ?? '');
+      if (url != null) {
+        await ChatService.sendMessage(
+          conversationId: _activeConversation!['id'],
+          senderId: widget.user['employee_id'] ?? '',
+          senderName: widget.user['name'] ?? '',
+          message: '',
+          messageType: 'image',
+          attachmentUrl: url,
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAndSendFile() async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result != null && result.files.single.path != null && _activeConversation != null) {
+      final file = File(result.files.single.path!);
+      final url = await ChatService.uploadFile(file, result.files.single.name, widget.user['employee_id'] ?? '');
+      if (url != null) {
+        await ChatService.sendMessage(
+          conversationId: _activeConversation!['id'],
+          senderId: widget.user['employee_id'] ?? '',
+          senderName: widget.user['name'] ?? '',
+          message: result.files.single.name,
+          messageType: 'file',
+          attachmentUrl: url,
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      final path = await _audioRecorder.stop();
+      setState(() => _isRecording = false);
+      if (path != null && _activeConversation != null) {
+        final file = File(path);
+        final url = await ChatService.uploadFile(file, 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a', widget.user['employee_id'] ?? '');
+        if (url != null) {
+          await ChatService.sendMessage(
+            conversationId: _activeConversation!['id'],
+            senderId: widget.user['employee_id'] ?? '',
+            senderName: widget.user['name'] ?? '',
+            message: '',
+            messageType: 'voice',
+            attachmentUrl: url,
+          );
+        }
+      }
+    } else {
+      if (await _audioRecorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        await _audioRecorder.start(
+          path: path,
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          samplingRate: 44100,
+        );
+        setState(() => _isRecording = true);
+      }
+    }
+  }
+
+  Future<void> _playVoice(String url) async {
+    await _audioPlayer.play(UrlSource(url));
   }
 
   Future<void> _startNewChat() async {
@@ -313,18 +397,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final isOnline = otherEmpId != null && otherUser.isNotEmpty;
     final lastSeen = otherUser['last_seen']?.toString();
     
-    String subtitle = '';
+    String subtitle = 'Offline';
     if (isOnline) {
       subtitle = 'Online';
     } else if (lastSeen != null && lastSeen.isNotEmpty) {
       try {
         final dt = DateTime.parse(lastSeen);
         subtitle = 'Last seen ${DateFormat('MMM d, h:mm a').format(dt)}';
-      } catch (_) {
-        subtitle = 'Offline';
-      }
-    } else {
-      subtitle = 'Offline';
+      } catch (_) {}
     }
 
     return GestureDetector(onTap: () { _pollTimer?.cancel(); setState(() => _activeConversation = null); }, child: Row(children: [
@@ -369,14 +449,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final today = DateTime(now.year, now.month, now.day);
       final msgDate = DateTime(dt.year, dt.month, dt.day);
       final diff = today.difference(msgDate).inDays;
-      
       if (diff == 0) return 'Today';
       if (diff == 1) return 'Yesterday';
-      if (diff < 7) return DateFormat('EEEE').format(dt); // Day name
+      if (diff < 7) return DateFormat('EEEE').format(dt);
       return DateFormat('MMM d, yyyy').format(dt);
-    } catch (_) {
-      return '';
-    }
+    } catch (_) { return ''; }
   }
 
   Widget _buildChatView() {
@@ -395,24 +472,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Map<String, dynamic>? _findMessageById(String? id) {
     if (id == null) return null;
-    try {
-      return _messages.firstWhere((m) => m['id'].toString() == id.toString());
-    } catch (_) {
-      return null;
-    }
+    try { return _messages.firstWhere((m) => m['id'].toString() == id.toString()); } catch (_) { return null; }
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> msg, bool isMe) {
-    final reactions = msg['reactions'] != null
-        ? (msg['reactions'] is String ? jsonDecode(msg['reactions']) : msg['reactions'])
-        : [];
-
+    final reactions = msg['reactions'] != null ? (msg['reactions'] is String ? jsonDecode(msg['reactions']) : msg['reactions']) : [];
     Map<String, dynamic>? repliedMsg;
-    if (msg['reply_to_id'] != null) {
-      repliedMsg = _findMessageById(msg['reply_to_id'].toString());
-    }
-
+    if (msg['reply_to_id'] != null) { repliedMsg = _findMessageById(msg['reply_to_id'].toString()); }
     final isEdited = msg['is_edited'] == true;
+    final msgType = msg['message_type'] ?? 'text';
+    final attachmentUrl = msg['attachment_url']?.toString();
 
     return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: GestureDetector(
       onLongPress: () => _showMessageOptions(msg),
@@ -429,24 +498,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (!isMe) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg['sender_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFCC0000)))),
           if (repliedMsg != null)
             Container(
-              padding: const EdgeInsets.all(8),
-              margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: isMe ? Colors.black26 : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: const Border(left: BorderSide(color: Color(0xFFD4AF37), width: 3)),
-              ),
+              padding: const EdgeInsets.all(8), margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(color: isMe ? Colors.black26 : Colors.grey.shade100, borderRadius: BorderRadius.circular(8), border: const Border(left: BorderSide(color: Color(0xFFD4AF37), width: 3))),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(repliedMsg['sender_name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: isMe ? Colors.white70 : const Color(0xFFCC0000))),
                 Text(repliedMsg['message'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: isMe ? Colors.white54 : Colors.grey.shade700)),
               ]),
             ),
-          Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)),
-          if (reactions.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(spacing: 4, children: reactions.map<Widget>((r) => Text(r['emoji'] ?? '', style: const TextStyle(fontSize: 14))).toList()),
+          if (msgType == 'image' && attachmentUrl != null)
+            ClipRRect(borderRadius: BorderRadius.circular(8), child: CachedNetworkImage(
+              imageUrl: attachmentUrl, width: 200, height: 150, fit: BoxFit.cover,
+              placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator())),
+              errorWidget: (context, url, error) => const Icon(Icons.broken_image, size: 50),
+            )),
+          if (msgType == 'file' && attachmentUrl != null)
+            InkWell(
+              onTap: () => launchUrl(Uri.parse(attachmentUrl), mode: LaunchMode.externalApplication),
+              child: Container(
+                padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: isMe ? Colors.black26 : Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.insert_drive_file, size: 20, color: isMe ? Colors.white : Colors.black87), const SizedBox(width: 4), Flexible(child: Text(msg['message'] ?? 'File', style: TextStyle(fontSize: 11, color: isMe ? Colors.white : Colors.black87)))]),
+              ),
             ),
+          if (msgType == 'voice' && attachmentUrl != null)
+            InkWell(
+              onTap: () => _playVoice(attachmentUrl),
+              child: Container(
+                padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: isMe ? Colors.black26 : Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.play_circle, size: 20, color: isMe ? Colors.white : Colors.black87), const SizedBox(width: 4), Text('Play voice', style: TextStyle(fontSize: 11, color: isMe ? Colors.white : Colors.black87))]),
+              ),
+            ),
+          if (msg['message'] != null && msg['message'].toString().isNotEmpty)
+            Text(msg['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : const Color(0xFF1A1A1A), fontSize: 14)),
+          if (reactions.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 4), child: Wrap(spacing: 4, children: reactions.map<Widget>((r) => Text(r['emoji'] ?? '', style: const TextStyle(fontSize: 14))).toList())),
           const SizedBox(height: 4),
           Row(mainAxisSize: MainAxisSize.min, children: [
             if (isEdited) Text('edited ', style: TextStyle(fontSize: 9, color: isMe ? Colors.white54 : Colors.grey)),
@@ -464,99 +548,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _showMessageOptions(Map<String, dynamic> msg) {
     final isMe = msg['sender_id'] == widget.user['employee_id'];
     showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(
-        leading: const Icon(Icons.reply), title: const Text('Reply'),
-        onTap: () {
-          Navigator.pop(ctx);
-          setState(() {
-            _replyingTo = msg['id']?.toString();
-            _replyingToSender = msg['sender_name']?.toString();
-            _replyingToMessage = msg['message']?.toString();
-          });
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.emoji_emotions), title: const Text('Add Reaction'),
-        onTap: () {
-          Navigator.pop(ctx);
-          _addReaction(msg['id']);
-        },
-      ),
+      ListTile(leading: const Icon(Icons.reply), title: const Text('Reply'), onTap: () { Navigator.pop(ctx); setState(() { _replyingTo = msg['id']?.toString(); _replyingToSender = msg['sender_name']?.toString(); _replyingToMessage = msg['message']?.toString(); }); }),
+      ListTile(leading: const Icon(Icons.emoji_emotions), title: const Text('Add Reaction'), onTap: () { Navigator.pop(ctx); _addReaction(msg['id']); }),
       if (isMe) ...[
-        ListTile(
-          leading: const Icon(Icons.edit, color: Color(0xFF3182CE)), title: const Text('Edit Message'),
-          onTap: () {
-            Navigator.pop(ctx);
-            _editMessage(msg);
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.delete, color: Colors.red), title: const Text('Delete Message'),
-          onTap: () {
-            Navigator.pop(ctx);
-            _deleteMessage(msg);
-          },
-        ),
+        ListTile(leading: const Icon(Icons.edit, color: Color(0xFF3182CE)), title: const Text('Edit Message'), onTap: () { Navigator.pop(ctx); _editMessage(msg); }),
+        ListTile(leading: const Icon(Icons.delete, color: Colors.red), title: const Text('Delete Message'), onTap: () { Navigator.pop(ctx); _deleteMessage(msg); }),
       ],
-      ListTile(
-        leading: const Icon(Icons.share), title: const Text('Share to WhatsApp'),
-        onTap: () { Navigator.pop(ctx); _shareToWhatsApp(msg['message'] ?? ''); },
-      ),
+      ListTile(leading: const Icon(Icons.share), title: const Text('Share to WhatsApp'), onTap: () { Navigator.pop(ctx); _shareToWhatsApp(msg['message'] ?? ''); }),
     ])));
   }
 
   Future<void> _editMessage(Map<String, dynamic> msg) async {
     final controller = TextEditingController(text: msg['message'] ?? '');
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Message'),
-        content: TextField(controller: controller, maxLines: 3, decoration: const InputDecoration(border: OutlineInputBorder())),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await _supabase.from('chat_messages_new').update({
-                'message': controller.text.trim(),
-                'is_edited': true,
-              }).eq('id', msg['id']);
-              if (_activeConversation != null && mounted) {
-                final updated = await ChatService.getMessages(_activeConversation!['id']);
-                if (mounted) setState(() => _messages = updated);
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFCC0000)),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
+    await showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Edit Message'),
+      content: TextField(controller: controller, maxLines: 3, decoration: const InputDecoration(border: OutlineInputBorder())),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () async {
+          Navigator.pop(ctx);
+          await _supabase.from('chat_messages_new').update({'message': controller.text.trim(), 'is_edited': true}).eq('id', msg['id']);
+          if (_activeConversation != null && mounted) { final updated = await ChatService.getMessages(_activeConversation!['id']); if (mounted) setState(() => _messages = updated); }
+        }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFCC0000)), child: const Text('Save')),
+      ],
+    ));
   }
 
   Future<void> _deleteMessage(Map<String, dynamic> msg) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Message?'),
-        content: const Text('This message will be permanently deleted.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
+    final confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Delete Message?'), content: const Text('This message will be permanently deleted.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
+      ],
+    ));
     if (confirm == true) {
       await _supabase.from('chat_messages_new').delete().eq('id', msg['id']);
-      if (_activeConversation != null && mounted) {
-        final updated = await ChatService.getMessages(_activeConversation!['id']);
-        if (mounted) setState(() => _messages = updated);
-      }
+      if (_activeConversation != null && mounted) { final updated = await ChatService.getMessages(_activeConversation!['id']); if (mounted) setState(() => _messages = updated); }
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message deleted'), backgroundColor: Colors.orange));
     }
   }
@@ -567,50 +595,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _addReaction(int messageId) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          Wrap(spacing: 12, runSpacing: 12, children: _quickEmojis.map((emoji) {
-            return GestureDetector(
-              onTap: () async {
-                Navigator.pop(ctx);
-                await ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji);
-                if (_activeConversation != null && mounted) {
-                  final updated = await ChatService.getMessages(_activeConversation!['id']);
-                  if (mounted) setState(() => _messages = updated);
-                }
-              },
-              child: Text(emoji, style: const TextStyle(fontSize: 28)),
-            );
-          }).toList()),
-          const SizedBox(height: 20),
-        ]),
-      ),
-    );
+    showModalBottomSheet(context: context, builder: (ctx) => Container(padding: const EdgeInsets.all(16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Text('Add Reaction', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 12),
+      Wrap(spacing: 12, runSpacing: 12, children: _quickEmojis.map((emoji) {
+        return GestureDetector(onTap: () async { Navigator.pop(ctx); await ChatService.addReaction(messageId, widget.user['name'] ?? '', emoji); if (_activeConversation != null && mounted) { final updated = await ChatService.getMessages(_activeConversation!['id']); if (mounted) setState(() => _messages = updated); } }, child: Text(emoji, style: const TextStyle(fontSize: 28)));
+      }).toList()),
+      const SizedBox(height: 20),
+    ])));
   }
 
   Widget _buildMessageInput() {
     return Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)]), child: Column(children: [
       if (_replyingTo != null)
-        Container(
-          padding: const EdgeInsets.all(8), margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(color: const Color(0xFFD4AF37).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-          child: Row(children: [
-            const Icon(Icons.reply, size: 16, color: Color(0xFFD4AF37)), const SizedBox(width: 8),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Replying to $_replyingToSender', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              if (_replyingToMessage != null) Text(_replyingToMessage!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-            ])),
-            GestureDetector(onTap: () => setState(() { _replyingTo = null; _replyingToSender = null; _replyingToMessage = null; }), child: const Icon(Icons.close, size: 16)),
-          ]),
-        ),
+        Container(padding: const EdgeInsets.all(8), margin: const EdgeInsets.only(bottom: 8), decoration: BoxDecoration(color: const Color(0xFFD4AF37).withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(children: [
+          const Icon(Icons.reply, size: 16, color: Color(0xFFD4AF37)), const SizedBox(width: 8),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Replying to $_replyingToSender', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            if (_replyingToMessage != null) Text(_replyingToMessage!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+          ])),
+          GestureDetector(onTap: () => setState(() { _replyingTo = null; _replyingToSender = null; _replyingToMessage = null; }), child: const Icon(Icons.close, size: 16)),
+        ])),
       Row(children: [
+        IconButton(icon: const Icon(Icons.image, color: Color(0xFF3182CE)), onPressed: _pickAndSendImage, tooltip: 'Send Image'),
+        IconButton(icon: const Icon(Icons.attach_file, color: Color(0xFFD4AF37)), onPressed: _pickAndSendFile, tooltip: 'Send File'),
+        IconButton(icon: Icon(_isRecording ? Icons.stop : Icons.mic, color: _isRecording ? Colors.red : const Color(0xFF38A169)), onPressed: _toggleRecording, tooltip: _isRecording ? 'Stop Recording' : 'Record Voice'),
         IconButton(icon: Icon(_showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions, color: const Color(0xFFD4AF37)), onPressed: () => setState(() => _showEmojiPicker = !_showEmojiPicker)),
-        Expanded(child: TextField(controller: _messageController, onChanged: (val) { if (_activeConversation != null) ChatService.setTyping(_activeConversation!['id'], widget.user['employee_id'] ?? '', widget.user['name'] ?? '', val.isNotEmpty); }, decoration: InputDecoration(hintText: 'Type a message...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none), filled: true, fillColor: Colors.grey.shade100, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), maxLines: 3, minLines: 1)),
+        Expanded(child: TextField(controller: _messageController, onChanged: (val) { if (_activeConversation != null) ChatService.setTyping(_activeConversation!['id'], widget.user['employee_id'] ?? '', widget.user['name'] ?? '', val.isNotEmpty); }, decoration: InputDecoration(hintText: _isRecording ? 'Recording...' : 'Type a message...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none), filled: true, fillColor: Colors.grey.shade100, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), maxLines: 3, minLines: 1)),
         const SizedBox(width: 8), CircleAvatar(backgroundColor: const Color(0xFFCC0000), child: IconButton(icon: _sending ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send, color: Colors.white, size: 20), onPressed: _sending ? null : _sendMessage)),
       ]),
     ]));
