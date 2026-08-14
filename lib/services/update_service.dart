@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class UpdateService {
   static final _supabase = Supabase.instance.client;
-  static const int _currentVersionCode = 2;
+  static const int _currentVersionCode = 3;
 
   static Future<void> checkForUpdate(BuildContext? context) async {
     try {
